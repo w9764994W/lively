@@ -1,0 +1,75 @@
+# Watt Toolkit CI Build: .NET10 | win-x86 / win-x64 / win-arm64
+name: WattToolkit MultiArch Build
+
+# 触发条件：主代码分支推送、PR
+on:
+  push:
+    branches: [ "core-separation" ]
+  pull_request:
+    branches: [ "core-separation" ]
+
+# 全局变量：按需修改为你的解决方案文件名
+env:
+  SOLUTION_NAME: SteamTools.sln
+  MAIN_PROJECT_PATH: src/WattToolkit/WattToolkit.csproj
+
+jobs:
+  build_all_arch:
+    runs-on: windows-latest
+    # 构建矩阵：并行编译三种Windows架构
+    strategy:
+      fail-fast: false
+      matrix:
+        build_config: [ Release ]
+        runtime_id:
+          - win-x86
+          - win-x64
+          - win-arm64
+
+    steps:
+      # 1. 拉取完整源码
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 安装 .NET 10 SDK
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # 3. 还原项目全部依赖
+      - name: Restore NuGet Dependencies
+        run: dotnet restore ${{ env.SOLUTION_NAME }}
+
+      # 4. 执行单元测试（校验代码可用性）
+      - name: Run Unit Tests
+        run: dotnet test ${{ env.SOLUTION_NAME }} -c ${{ matrix.build_config }} --no-restore
+
+      # 5. 发布自包含单文件程序
+      - name: Publish ${{ matrix.runtime_id }} Standalone Package
+        run: |
+          dotnet publish ${{ env.MAIN_PROJECT_PATH }} `
+            -c ${{ matrix.build_config }} `
+            -r ${{ matrix.runtime_id }} `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false
+
+      # 6. 打包输出目录为压缩包
+      - name: Archive Build Output
+        run: |
+          $outDir = "${{ env.MAIN_PROJECT_PATH }}/bin/${{ matrix.build_config }}/net10.0/${{ matrix.runtime_id }}/publish"
+          Compress-Archive -Path "$outDir/*" -DestinationPath "WattToolkit_${{ matrix.runtime_id }}.zip" -Force
+
+      # 7. 上传压缩包为流水线制品
+      - name: Upload Artifact ${{ matrix.runtime_id }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: WattToolkit_${{ matrix.runtime_id }}
+          path: WattToolkit_${{ matrix.runtime_id }}.zip
+          retention-days: 30
+
